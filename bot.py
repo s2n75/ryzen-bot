@@ -103,31 +103,36 @@ async def call_db(**params) -> list[dict]:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json, */*",
         "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
-        "Referer": "https://reacher-w2dn.onrender.com/",
-        "Origin": "https://reacher-w2dn.onrender.com",
+        "Referer": "https://reacher.lol/",
+        "Origin": "https://reacher.lol",
     }
 
     async with aiohttp.ClientSession(headers=headers) as session:
 
-        # ── Endpoint 1 : reacher-w2dn.onrender.com/api/search ────────────────
-        r1 = await try_get(session, "https://reacher-w2dn.onrender.com/api/search", params, "Reacher/api/search")
+        # ── Endpoint 1 : reacher.lol/api/search ──────────────────────────────
+        r1 = await try_get(session, "https://reacher.lol/api/search", params, "Reacher/api/search")
         results.extend(r1)
 
-        # ── Endpoint 2 : reacher-w2dn.onrender.com/search ────────────────────
+        # ── Endpoint 2 : reacher.lol/search ──────────────────────────────────
         if not results:
-            r2 = await try_get(session, "https://reacher-w2dn.onrender.com/search", params, "Reacher/search")
+            r2 = await try_get(session, "https://reacher.lol/search", params, "Reacher/search")
             results.extend(r2)
 
-        # ── Endpoint 3 : reacher-w2dn.onrender.com/api/query ─────────────────
+        # ── Endpoint 3 : reacher.lol/api/query ───────────────────────────────
         if not results:
-            r3 = await try_get(session, "https://reacher-w2dn.onrender.com/api/query", params, "Reacher/api/query")
+            r3 = await try_get(session, "https://reacher.lol/api/query", params, "Reacher/api/query")
             results.extend(r3)
 
-        # ── Endpoint 4 : fd54a71c.sentinet.nl/bde ────────────────────────────
+        # ── Endpoint 4 : reacher.lol/bde ─────────────────────────────────────
+        if not results:
+            r4b = await try_get(session, "https://reacher.lol/bde", params, "Reacher/bde")
+            results.extend(r4b)
+
+        # ── Endpoint 5 : api.sentinet.nl/search (si clé dispo) ───────────────
         p4 = dict(params)
         if SENTINET_API_KEY:
             p4["api_key"] = SENTINET_API_KEY
-        r4 = await try_get(session, "https://fd54a71c.sentinet.nl/bde", p4, "SentiNet-BDE")
+        r4 = await try_get(session, "https://api.sentinet.nl/search", p4, "SentiNet-API")
         # dédoublonnage
         emails = {e.get("email", "") for e in results}
         for e in r4:
@@ -135,20 +140,15 @@ async def call_db(**params) -> list[dict]:
                 results.append(e)
                 emails.add(e.get("email", ""))
 
-        # ── Endpoint 5 : fd54a71c.sentinet.nl/search ─────────────────────────
+        # ── Endpoint 6 : fd54a71c.sentinet.nl/bde ────────────────────────────
         if not results:
-            r5 = await try_get(session, "https://fd54a71c.sentinet.nl/search", p4, "SentiNet/search")
+            r5 = await try_get(session, "https://fd54a71c.sentinet.nl/bde", p4, "SentiNet-BDE")
             results.extend(r5)
 
-        # ── Endpoint 6 : api.sentinet.nl/search (si clé dispo) ───────────────
-        if SENTINET_API_KEY:
-            p6 = dict(params)
-            p6["api_key"] = SENTINET_API_KEY
-            r6 = await try_get(session, "https://api.sentinet.nl/search", p6, "SentiNet-API")
-            emails2 = {e.get("email", "") for e in results}
-            for e in r6:
-                if e.get("email", "") not in emails2:
-                    results.append(e)
+        # ── Endpoint 7 : fd54a71c.sentinet.nl/search ─────────────────────────
+        if not results:
+            r6 = await try_get(session, "https://fd54a71c.sentinet.nl/search", p4, "SentiNet/search")
+            results.extend(r6)
 
     print(f"[TOTAL] {len(results)} résultats")
     return results
