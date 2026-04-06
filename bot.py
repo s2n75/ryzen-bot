@@ -99,6 +99,9 @@ async def call_db(**params) -> list[dict]:
     """Cherche dans toutes les sources disponibles."""
     results = []
 
+    # Token trouvé via F12 sur reacher.lol
+    SEARCH_TOKEN = "926ffefb595eb50f1c02d9862ffb3bbf4721bf108b08fda2087cb654fd2640388"
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
         "Accept": "application/json, */*",
@@ -107,48 +110,22 @@ async def call_db(**params) -> list[dict]:
         "Origin": "https://reacher.lol",
     }
 
+    # Ajouter le search_token à tous les params
+    params_with_token = dict(params)
+    params_with_token["search_token"] = SEARCH_TOKEN
+
     async with aiohttp.ClientSession(headers=headers) as session:
 
-        # ── Endpoint 1 : reacher.lol/api/search ──────────────────────────────
-        r1 = await try_get(session, "https://reacher.lol/api/search", params, "Reacher/api/search")
+        # ── Endpoint principal : reacher.lol/api/search avec search_token ────
+        r1 = await try_get(session, "https://reacher.lol/api/search", params_with_token, "Reacher/api/search")
         results.extend(r1)
 
-        # ── Endpoint 2 : reacher.lol/search ──────────────────────────────────
-        if not results:
-            r2 = await try_get(session, "https://reacher.lol/search", params, "Reacher/search")
+        # ── Fallback : api.sentinet.nl/search (si clé dispo) ─────────────────
+        if not results and SENTINET_API_KEY:
+            p2 = dict(params)
+            p2["api_key"] = SENTINET_API_KEY
+            r2 = await try_get(session, "https://api.sentinet.nl/search", p2, "SentiNet-API")
             results.extend(r2)
-
-        # ── Endpoint 3 : reacher.lol/api/query ───────────────────────────────
-        if not results:
-            r3 = await try_get(session, "https://reacher.lol/api/query", params, "Reacher/api/query")
-            results.extend(r3)
-
-        # ── Endpoint 4 : reacher.lol/bde ─────────────────────────────────────
-        if not results:
-            r4b = await try_get(session, "https://reacher.lol/bde", params, "Reacher/bde")
-            results.extend(r4b)
-
-        # ── Endpoint 5 : api.sentinet.nl/search (si clé dispo) ───────────────
-        p4 = dict(params)
-        if SENTINET_API_KEY:
-            p4["api_key"] = SENTINET_API_KEY
-        r4 = await try_get(session, "https://api.sentinet.nl/search", p4, "SentiNet-API")
-        # dédoublonnage
-        emails = {e.get("email", "") for e in results}
-        for e in r4:
-            if e.get("email", "") not in emails:
-                results.append(e)
-                emails.add(e.get("email", ""))
-
-        # ── Endpoint 6 : fd54a71c.sentinet.nl/bde ────────────────────────────
-        if not results:
-            r5 = await try_get(session, "https://fd54a71c.sentinet.nl/bde", p4, "SentiNet-BDE")
-            results.extend(r5)
-
-        # ── Endpoint 7 : fd54a71c.sentinet.nl/search ─────────────────────────
-        if not results:
-            r6 = await try_get(session, "https://fd54a71c.sentinet.nl/search", p4, "SentiNet/search")
-            results.extend(r6)
 
     print(f"[TOTAL] {len(results)} résultats")
     return results
@@ -551,12 +528,10 @@ async def cmd_search(interaction: discord.Interaction):
         "[+] Export .txt\n"
         "```"
     )
-    embed.add_field(name="Créateur:", value="@Skayrush", inline=False)
+    embed.add_field(name="Créateur:", value="@8g7b", inline=False)
     await interaction.response.send_message(embed=embed, view=SearchView(), ephemeral=True)
 
-@tree.command(name="xsint", description="Recherche avancée xsint")
-async def cmd_xsint(interaction: discord.Interaction):
-    await interaction.response.send_modal(ModalAvance())
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
