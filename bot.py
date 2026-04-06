@@ -95,12 +95,81 @@ async def try_get(session, url, params, label):
     return []
 
 
+# Cache du token — récupéré automatiquement
+_token_cache = {"token": None, "expires": 0}
+
+async def get_search_token() -> str | None:
+    """Récupère automatiquement le search_token depuis reacher.lol."""
+    import time, re
+    
+    # Si le token en cache est encore valide (1h), on le réutilise
+    if _token_cache["token"] and time.time() < _token_cache["expires"]:
+        print(f"[TOKEN] Réutilisation du cache : {_token_cache['token'][:20]}...")
+        return _token_cache["token"]
+
+    print("[TOKEN] Récupération d'un nouveau token...")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9",
+    }
+
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            # Étape 1 : charger la page principale pour obtenir les JS
+            async with session.get("https://reacher.lol/", timeout=aiohttp.ClientTimeout(total=15)) as r:
+                html = await r.text()
+                # Cherche les fichiers JS dans le HTML
+                js_files = re.findall(r'src=["\']([^"\']*\.js[^"\']*)["\']', html)
+                print(f"[TOKEN] {len(js_files)} fichiers JS trouvés")
+
+            # Étape 2 : cherche le token dans les fichiers JS
+            for js_url in js_files:
+                if not js_url.startswith("http"):
+                    js_url = "https://reacher.lol" + js_url
+                try:
+                    async with session.get(js_url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        if r.status == 200:
+                            js_content = await r.text()
+                            # Cherche un token hexadécimal de 64 caractères
+                            tokens = re.findall("[a-f0-9]{64}", js_content)
+                            if tokens:
+                                token = tokens[0]
+                                _token_cache["token"] = token
+                                _token_cache["expires"] = time.time() + 3600  # 1h
+                                print(f"[TOKEN] ✅ Nouveau token trouvé : {token[:20]}...")
+                                return token
+                except:
+                    continue
+
+            # Étape 3 : si pas trouvé dans JS, faire une vraie requête et capturer le token
+            async with session.get(
+                "https://reacher.lol/api/search",
+                params={"nom": "test"},
+                timeout=aiohttp.ClientTimeout(total=15)
+            ) as r:
+                # Cherche le token dans l'URL de redirection ou la réponse
+                text = await r.text()
+                tokens = re.findall(r"search_token[=:]+[^a-f0-9]*([a-f0-9]{64})", text)
+                if tokens:
+                    token = tokens[0]
+                    _token_cache["token"] = token
+                    _token_cache["expires"] = time.time() + 3600
+                    print(f"[TOKEN] ✅ Token depuis réponse : {token[:20]}...")
+                    return token
+
+    except Exception as e:
+        print(f"[TOKEN] ERREUR: {e}")
+
+    # Fallback : token hardcodé (marche jusqu'à expiration)
+    fallback = "926ffefb595eb50f1c02d9862ffb3bbf4721bf108b08fda2087cb654fd2640388"
+    print(f"[TOKEN] ⚠️ Utilisation du token fallback")
+    return fallback
+
+
 async def call_db(**params) -> list[dict]:
     """Cherche dans toutes les sources disponibles."""
     results = []
-
-    # Token trouvé via F12 sur reacher.lol
-    SEARCH_TOKEN = "926ffefb595eb50f1c02d9862ffb3bbf4721bf108b08fda2087cb654fd2640388"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
@@ -110,15 +179,27 @@ async def call_db(**params) -> list[dict]:
         "Origin": "https://reacher.lol",
     }
 
-    # Ajouter le search_token à tous les params
+    # Récupère le token automatiquement
+    token = await get_search_token()
+
     params_with_token = dict(params)
-    params_with_token["search_token"] = SEARCH_TOKEN
+    if token:
+        params_with_token["search_token"] = token
 
     async with aiohttp.ClientSession(headers=headers) as session:
 
-        # ── Endpoint principal : reacher.lol/api/search avec search_token ────
+        # ── Endpoint principal : reacher.lol/api/search ───────────────────────
         r1 = await try_get(session, "https://reacher.lol/api/search", params_with_token, "Reacher/api/search")
         results.extend(r1)
+
+        # ── Si token expiré, on reforce un nouveau token et on réessaie ───────
+        if not results and token:
+            _token_cache["expires"] = 0  # reset cache
+            new_token = await get_search_token()
+            if new_token and new_token != token:
+                params_with_token["search_token"] = new_token
+                r1b = await try_get(session, "https://reacher.lol/api/search", params_with_token, "Reacher/retry")
+                results.extend(r1b)
 
         # ── Fallback : api.sentinet.nl/search (si clé dispo) ─────────────────
         if not results and SENTINET_API_KEY:
